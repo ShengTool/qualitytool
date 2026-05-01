@@ -73,8 +73,23 @@ fun TaskListScreen(vm: TaskViewModel) {
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
-        vm.errorMessage.collect { msg ->
-            snackbarHostState.showSnackbar(msg, duration = SnackbarDuration.Short)
+        launch {
+            vm.errorMessage.collect { msg ->
+                snackbarHostState.showSnackbar(msg, duration = SnackbarDuration.Short)
+            }
+        }
+        launch {
+            vm.snackbarEvent.collect { event ->
+                val result = snackbarHostState.showSnackbar(
+                    event.message, event.actionLabel, duration = SnackbarDuration.Long
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    when (event.undoAction) {
+                        "complete" -> vm.undoCompleteAllTasks()
+                        "deleteCompleted" -> vm.undoDeleteCompletedTasks()
+                    }
+                }
+            }
         }
     }
 

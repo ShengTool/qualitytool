@@ -1,14 +1,18 @@
 package com.qualitytool.app.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.*
 import com.qualitytool.app.data.TaskStorage
 import com.qualitytool.app.model.Task
 import com.qualitytool.app.model.TaskCategory
+import com.qualitytool.app.worker.DeadlineWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 
 enum class TaskFilterStatus(val label: String) {
     ALL("全部"), ACTIVE("进行中"), COMPLETED("已完成")
@@ -26,6 +30,7 @@ enum class SortOption(val label: String) {
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val storage = TaskStorage(application)
+    private val prefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
 
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
@@ -42,11 +47,22 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _sortOption = MutableStateFlow(SortOption.DEFAULT)
     val sortOption: StateFlow<SortOption> = _sortOption.asStateFlow()
 
-    private val _darkTheme = MutableStateFlow<Boolean?>(null)
+    private val _darkTheme = MutableStateFlow(
+        when (prefs.getString("dark_theme", "auto")) {
+            "on" -> true
+            "off" -> false
+            else -> null
+        }
+    )
     val darkTheme: StateFlow<Boolean?> = _darkTheme.asStateFlow()
 
     private val _errorMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val errorMessage: SharedFlow<String> = _errorMessage.asSharedFlow()
+
+    private val _snackbarEvent = MutableSharedFlow<SnackbarEvent>(extraBufferCapacity = 1)
+    val snackbarEvent: SharedFlow<SnackbarEvent> = _snackbarEvent.asSharedFlow()
+
+    private var lastBatchSnapshot: List<Task>? = null
 
     val filteredTasks: StateFlow<List<Task>> = combine(
         _tasks, _searchQuery, _filterCategory, _filterStatus, _sortOption
@@ -110,20 +126,28 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addTask(task: Task) { _tasks.update { it + task }; saveTasks() }
+    fun addTask(task: Task) {
+        _tasks.update { it + task }
+        scheduleDeadlineNotification(task)
+        saveTasks()
+    }
 
     fun updateTask(updated: Task) {
         _tasks.update { current -> current.map { if (it.id == updated.id) updated else it } }
+        scheduleDeadlineNotification(updated)
         saveTasks()
     }
 
     fun toggleTask(taskId: String) {
         _tasks.update { current ->
             current.map {
-                if (it.id == taskId) it.copy(
-                    isCompleted = !it.isCompleted,
-                    completedAt = if (!it.isCompleted) System.currentTimeMillis() else null
-                ) else it
+                if (it.id == taskId) {
+                    if (!it.isCompleted) cancelDeadlineNotification(taskId)
+                    it.copy(
+                        isCompleted = !it.isCompleted,
+                        completedAt = if (!it.isCompleted) System.currentTimeMillis() else null
+                    )
+                } else it
             }
         }
         saveTasks()
@@ -131,6 +155,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteTask(taskId: String) {
         _tasks.update { current -> current.filter { it.id != taskId } }
+        cancelDeadlineNotification(taskId)
         viewModelScope.launch(Dispatchers.IO) {
             try { storage.deleteTask(taskId) } catch (e: Exception) {
                 _errorMessage.emit("删除失败: ${e.message}")
@@ -139,22 +164,52 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun completeAllTasks() {
+        lastBatchSnapshot = _tasks.value.toList()
+        val now = System.currentTimeMillis()
+        val changedIds = _tasks.value.filter { !it.isCompleted }.map { it.id }
         _tasks.update { current ->
-            val now = System.currentTimeMillis()
             current.map { if (!it.isCompleted) it.copy(isCompleted = true, completedAt = now) else it }
         }
+        changedIds.forEach { cancelDeadlineNotification(it) }
         viewModelScope.launch(Dispatchers.IO) {
-            try { storage.completeAllTasks() } catch (e: Exception) {
-                _errorMessage.emit("操作失败: ${e.message}")
+            try {
+                storage.completeAllTasks()
+                _snackbarEvent.emit(SnackbarEvent("已全部完成", "撤销", undoAction = "complete"))
+            } catch (e: Exception) { _errorMessage.emit("操作失败: ${e.message}") }
+        }
+    }
+
+    fun undoCompleteAllTasks() {
+        val snapshot = lastBatchSnapshot ?: return
+        _tasks.value = snapshot
+        lastBatchSnapshot = null
+        viewModelScope.launch(Dispatchers.IO) {
+            try { storage.saveTasks(snapshot) } catch (e: Exception) {
+                _errorMessage.emit("撤销失败: ${e.message}")
             }
         }
     }
 
     fun deleteCompletedTasks() {
+        lastBatchSnapshot = _tasks.value.toList()
+        val deletedIds = _tasks.value.filter { it.isCompleted }.map { it.id }
         _tasks.update { current -> current.filter { !it.isCompleted } }
+        deletedIds.forEach { cancelDeadlineNotification(it) }
         viewModelScope.launch(Dispatchers.IO) {
-            try { storage.deleteCompletedTasks() } catch (e: Exception) {
-                _errorMessage.emit("删除失败: ${e.message}")
+            try {
+                storage.deleteCompletedTasks()
+                _snackbarEvent.emit(SnackbarEvent("已删除已完成任务", "撤销", undoAction = "deleteCompleted"))
+            } catch (e: Exception) { _errorMessage.emit("删除失败: ${e.message}") }
+        }
+    }
+
+    fun undoDeleteCompletedTasks() {
+        val snapshot = lastBatchSnapshot ?: return
+        _tasks.value = snapshot
+        lastBatchSnapshot = null
+        viewModelScope.launch(Dispatchers.IO) {
+            try { storage.saveTasks(snapshot) } catch (e: Exception) {
+                _errorMessage.emit("撤销失败: ${e.message}")
             }
         }
     }
@@ -186,7 +241,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setDarkTheme(enabled: Boolean?) {
         _darkTheme.value = enabled
-        saveTasks()
+        prefs.edit().putString(
+            "dark_theme",
+            when (enabled) {
+                true -> "on"
+                false -> "off"
+                null -> "auto"
+            }
+        ).apply()
     }
 
     private fun saveTasks() {
@@ -196,4 +258,37 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    private fun scheduleDeadlineNotification(task: Task) {
+        val deadline = task.deadline ?: return
+        if (task.isCompleted || deadline <= System.currentTimeMillis()) return
+        val delay = deadline - System.currentTimeMillis()
+        val request = OneTimeWorkRequestBuilder<DeadlineWorker>()
+            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .setInputData(
+                Data.Builder()
+                    .putString(DeadlineWorker.TASK_ID_KEY, task.id)
+                    .putString(DeadlineWorker.TASK_TITLE_KEY, task.title)
+                    .build()
+            )
+            .addTag("deadline_${task.id}")
+            .build()
+        WorkManager.getInstance(getApplication())
+            .enqueueUniqueWork(
+                "deadline_${task.id}",
+                ExistingWorkPolicy.REPLACE,
+                request
+            )
+    }
+
+    private fun cancelDeadlineNotification(taskId: String) {
+        WorkManager.getInstance(getApplication())
+            .cancelUniqueWork("deadline_$taskId")
+    }
 }
+
+data class SnackbarEvent(
+    val message: String,
+    val actionLabel: String,
+    val undoAction: String
+)

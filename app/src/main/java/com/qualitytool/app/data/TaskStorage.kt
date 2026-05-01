@@ -6,6 +6,7 @@ import com.google.gson.reflect.TypeToken
 import com.qualitytool.app.model.Task
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -17,11 +18,7 @@ class TaskStorage(private val context: Context) {
     private val jsonFile: File get() = File(context.filesDir, "tasks.json")
 
     suspend fun loadTasks(): List<Task> = withContext(Dispatchers.IO) {
-        val entities = withContext(Dispatchers.IO) {
-            var snapshot: List<TaskEntity> = emptyList()
-            dao.getAllTasks().collect { snapshot = it; return@collect }
-            snapshot
-        }
+        val entities = dao.getAllTasks().first()
         if (entities.isEmpty()) migrateFromJson()
         entities.map { it.toTask() }
     }
