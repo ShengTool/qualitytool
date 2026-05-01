@@ -3,6 +3,7 @@ package com.qualitytool.app.ui.components
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,6 +13,8 @@ import androidx.compose.ui.unit.dp
 import com.qualitytool.app.model.Task
 import com.qualitytool.app.model.TaskCategory
 import com.qualitytool.app.model.TaskPriority
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,9 +27,13 @@ fun TaskEditDialog(
     var description by remember(task) { mutableStateOf(task?.description ?: "") }
     var category by remember(task) { mutableStateOf(task?.category ?: TaskCategory.FEATURE) }
     var priority by remember(task) { mutableStateOf(task?.priority ?: TaskPriority.MEDIUM) }
+    var deadline by remember(task) { mutableStateOf(task?.deadline) }
     var categoryExpanded by remember { mutableStateOf(false) }
     var priorityExpanded by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
     val isEdit = task != null
+
+    val dateFmt = remember { SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -97,14 +104,50 @@ fun TaskEditDialog(
                         }
                     }
                 }
+                OutlinedTextField(
+                    value = if (deadline != null) dateFmt.format(Date(deadline!!)) else "",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("截止日期（可选）") },
+                    placeholder = { Text("点击选择截止日期") },
+                    trailingIcon = {
+                        IconButton(onClick = { showDatePicker = true }) {
+                            Icon(Icons.Default.DateRange, "选择日期")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp), singleLine = true,
+                    enabled = false,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                        disabledBorderColor = MaterialTheme.colorScheme.outline,
+                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        disabledPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        disabledTrailingIconColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+                if (deadline != null) {
+                    TextButton(
+                        onClick = { deadline = null },
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                    ) {
+                        Text("清除截止日期", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onSave(if (isEdit) task!!.copy(title = title, description = description, category = category, priority = priority)
-                        else Task(title = title, description = description, category = category, priority = priority))
+                        onSave(if (isEdit) task!!.copy(
+                            title = title, description = description,
+                            category = category, priority = priority, deadline = deadline
+                        )
+                        else Task(
+                            title = title, description = description,
+                            category = category, priority = priority, deadline = deadline
+                        ))
                     }
                 },
                 enabled = title.isNotBlank(),
@@ -113,4 +156,24 @@ fun TaskEditDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = deadline ?: System.currentTimeMillis()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    deadline = datePickerState.selectedDateMillis
+                    showDatePicker = false
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }

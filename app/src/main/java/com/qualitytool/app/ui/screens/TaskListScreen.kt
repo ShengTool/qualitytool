@@ -1,5 +1,7 @@
 package com.qualitytool.app.ui.screens
 
+import android.content.Intent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -24,9 +27,11 @@ import androidx.compose.ui.unit.sp
 import com.qualitytool.app.model.Task
 import com.qualitytool.app.model.TaskCategory
 import com.qualitytool.app.model.TaskPriority
+import com.qualitytool.app.ui.SortOption
 import com.qualitytool.app.ui.TaskFilterStatus
 import com.qualitytool.app.ui.TaskViewModel
 import com.qualitytool.app.ui.components.TaskEditDialog
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -52,16 +57,86 @@ fun TaskListScreen(vm: TaskViewModel) {
     val filterCategory by vm.filterCategory.collectAsState()
     val filterStatus by vm.filterStatus.collectAsState()
     val searchQuery by vm.searchQuery.collectAsState()
+    val sortOption by vm.sortOption.collectAsState()
     val progress by vm.completionProgress.collectAsState()
+    val categoryStats by vm.categoryStats.collectAsState()
+    val darkTheme by vm.darkTheme.collectAsState()
 
     var showDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
+    var taskToDelete by remember { mutableStateOf<Task?>(null) }
+    var viewingTask by remember { mutableStateOf<Task?>(null) }
+    var showBatchMenu by remember { mutableStateOf(false) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        vm.errorMessage.collect { msg ->
+            snackbarHostState.showSnackbar(msg, duration = SnackbarDuration.Short)
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("🎯 开发任务清单", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                title = { Text("\uD83C\uDFAF 开发任务清单", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                actions = {
+                    IconButton(onClick = {
+                        vm.setDarkTheme(when (darkTheme) {
+                            null -> false; false -> true; true -> null
+                        })
+                    }) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Outlined.Settings,
+                                contentDescription = "主题切换",
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                when (darkTheme) {
+                                    true -> "深色"
+                                    false -> "浅色"
+                                    null -> "自动"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 8.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    Box {                    IconButton(onClick = { showBatchMenu = true }) {
+                        Icon(Icons.Outlined.MoreVert, "更多操作")
+                    }
+                        DropdownMenu(expanded = showBatchMenu, onDismissRequest = { showBatchMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("一键完成全部") },
+                                onClick = { showBatchMenu = false; vm.completeAllTasks() },
+                                leadingIcon = { Icon(Icons.Outlined.Check, null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("删除已完成") },
+                                onClick = { showBatchMenu = false; vm.deleteCompletedTasks() },
+                                leadingIcon = { Icon(Icons.Outlined.Delete, null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导出任务") },
+                                onClick = {
+                                    showBatchMenu = false
+                                    val json = vm.exportTasks()
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/json"
+                                        putExtra(Intent.EXTRA_TEXT, json)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "导出任务"))
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Share, null) }
+                            )
+                        }
+                    }
+                }
             )
         },
         floatingActionButton = {
@@ -70,14 +145,14 @@ fun TaskListScreen(vm: TaskViewModel) {
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ) { Icon(Icons.Default.Add, "添加") }
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // --- Progress Card ---
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -113,9 +188,24 @@ fun TaskListScreen(vm: TaskViewModel) {
                 )
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // --- Search ---
+            if (allTasks.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("分类统计", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(6.dp))
+                        CategoryStatsBar(categoryStats, allTasks.size)
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+
             OutlinedTextField(
                 value = searchQuery, onValueChange = { vm.setSearchQuery(it) },
                 modifier = Modifier.fillMaxWidth(), placeholder = { Text("搜索任务...") },
@@ -130,9 +220,8 @@ fun TaskListScreen(vm: TaskViewModel) {
                 )
             )
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // --- Category Chips ---
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = filterCategory == null,
                     onClick = { vm.setFilterCategory(null) },
@@ -146,7 +235,6 @@ fun TaskListScreen(vm: TaskViewModel) {
 
             Spacer(Modifier.height(6.dp))
 
-            // --- Status Chips ---
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 TaskFilterStatus.entries.forEach { s ->
                     FilterChip(selected = filterStatus == s,
@@ -155,9 +243,18 @@ fun TaskListScreen(vm: TaskViewModel) {
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
 
-            // --- Content ---
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SortOption.entries.forEach { opt ->
+                    FilterChip(selected = sortOption == opt,
+                        onClick = { vm.setSortOption(opt) },
+                        label = { Text(opt.label, style = MaterialTheme.typography.labelSmall) })
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
             when {
                 allTasks.isEmpty() -> EmptyPlaceholder { showDialog = true }
                 tasks.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -169,11 +266,42 @@ fun TaskListScreen(vm: TaskViewModel) {
                     modifier = Modifier.weight(1f)
                 ) {
                     items(tasks, key = { it.id }) { task ->
-                        TaskCard(
-                            task = task,
-                            onToggle = { vm.toggleTask(task.id) },
-                            onEdit = { editingTask = task }
+                        val taskIndex = tasks.indexOfFirst { it.id == task.id }
+                        val dismissState = rememberSwipeToDismissBoxState(
+                            confirmValueChange = { value ->
+                                if (value == SwipeToDismissBoxValue.EndToStart) {
+                                    taskToDelete = task; false
+                                } else false
+                            }
                         )
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            enableDismissFromStartToEnd = false,
+                            backgroundContent = {
+                                val color by animateColorAsState(
+                                    targetValue = MaterialTheme.colorScheme.errorContainer,
+                                    label = "dismissBg"
+                                )
+                                Box(
+                                    Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
+                                        .background(color).padding(horizontal = 20.dp),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    Icon(Icons.Default.Delete, "删除",
+                                        tint = MaterialTheme.colorScheme.onErrorContainer)
+                                }
+                            }
+                        ) {
+                            TaskCard(
+                                task = task,
+                                onToggle = { vm.toggleTask(task.id) },
+                                onEdit = { editingTask = task },
+                                onDelete = { taskToDelete = task },
+                                onClick = { viewingTask = task },
+                                onMoveUp = if (taskIndex > 0) ({ vm.moveTaskUp(task.id) }) else null,
+                                onMoveDown = if (taskIndex < tasks.lastIndex) ({ vm.moveTaskDown(task.id) }) else null
+                            )
+                        }
                     }
                     item { Spacer(Modifier.height(80.dp)) }
                 }
@@ -191,23 +319,119 @@ fun TaskListScreen(vm: TaskViewModel) {
             }
         )
     }
+
+    if (taskToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { taskToDelete = null },
+            shape = RoundedCornerShape(20.dp),
+            icon = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("确认删除") },
+            text = { Text("确定要删除任务「${taskToDelete!!.title}」吗？此操作不可撤销。") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val deleted = taskToDelete!!
+                        vm.deleteTask(deleted.id)
+                        taskToDelete = null
+                        scope.launch {
+                            val result = snackbarHostState.showSnackbar(
+                                "已删除「${deleted.title}」",
+                                actionLabel = "撤销",
+                                duration = SnackbarDuration.Short
+                            )
+                            if (result == SnackbarResult.ActionPerformed) {
+                                vm.addTask(deleted)
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { taskToDelete = null }) { Text("取消") } }
+        )
+    }
+
+    if (viewingTask != null) {
+        TaskDetailDialog(task = viewingTask!!, onDismiss = { viewingTask = null })
+    }
 }
 
 @Composable
-private fun TaskCard(task: Task, onToggle: () -> Unit, onEdit: () -> Unit) {
+private fun CategoryStatsBar(stats: Map<TaskCategory, Int>, total: Int) {
+    val maxVal = stats.values.maxOrNull() ?: 1
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        TaskCategory.entries.forEach { cat ->
+            val count = stats[cat] ?: 0
+            val cc = categoryColor[cat] ?: Color.Gray
+            val fraction = if (total > 0) count.toFloat() / total else 0f
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${cat.emoji} ${cat.label}",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(56.dp))
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(fraction)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(cc.copy(alpha = 0.6f))
+                    )
+                }
+                Text("$count",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(24.dp).padding(start = 4.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskCard(
+    task: Task,
+    onToggle: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onClick: () -> Unit,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?
+) {
     val fmt = remember { SimpleDateFormat("M/d HH:mm", Locale.getDefault()) }
+    val deadlineFmt = remember { SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()) }
     val pc = priorityColor[task.priority] ?: Color.Gray
     val cc = categoryColor[task.category] ?: Color.Gray
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.width(24.dp)
+            ) {
+                if (onMoveUp != null)
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(20.dp)) {
+                        Icon(Icons.Filled.KeyboardArrowUp, "上移",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+                    }
+                if (onMoveDown != null)
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(20.dp)) {
+                        Icon(Icons.Filled.KeyboardArrowDown, "下移",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+                    }
+            }
             Checkbox(
                 checked = task.isCompleted, onCheckedChange = { onToggle() },
                 colors = CheckboxDefaults.colors(
@@ -216,7 +440,6 @@ private fun TaskCard(task: Task, onToggle: () -> Unit, onEdit: () -> Unit) {
             )
             Spacer(Modifier.width(4.dp))
             Column(Modifier.weight(1f)) {
-                // Title with strikethrough animation
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = task.title,
@@ -244,11 +467,26 @@ private fun TaskCard(task: Task, onToggle: () -> Unit, onEdit: () -> Unit) {
                     Text(task.priority.label, style = MaterialTheme.typography.labelSmall, color = pc)
                     Text(fmt.format(Date(task.createdAt)), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                    if (task.deadline != null) {
+                        Icon(Icons.Outlined.DateRange, "截止日期",
+                            modifier = Modifier.size(14.dp),
+                            tint = if (task.deadline!! < System.currentTimeMillis() && !task.isCompleted)
+                                MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                        Text(deadlineFmt.format(Date(task.deadline!!)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (task.deadline!! < System.currentTimeMillis() && !task.isCompleted)
+                                MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                    }
                 }
             }
-            // Edit icon
             IconButton(onClick = onEdit) {
                 Icon(Icons.Outlined.Edit, "编辑", modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Outlined.Delete, "删除", modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
             }
         }
@@ -256,10 +494,89 @@ private fun TaskCard(task: Task, onToggle: () -> Unit, onEdit: () -> Unit) {
 }
 
 @Composable
+private fun TaskDetailDialog(task: Task, onDismiss: () -> Unit) {
+    val fmt = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()) }
+    val pc = priorityColor[task.priority] ?: Color.Gray
+    val cc = categoryColor[task.category] ?: Color.Gray
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(20.dp),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(task.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭") }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(shape = RoundedCornerShape(6.dp), color = cc.copy(alpha = 0.15f)) {
+                        Text("${task.category.emoji} ${task.category.label}",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelMedium, color = cc)
+                    }
+                    Surface(shape = RoundedCornerShape(6.dp), color = pc.copy(alpha = 0.15f)) {
+                        Text(task.priority.label,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelMedium, color = pc)
+                    }
+                    if (task.isCompleted) {
+                        Surface(shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF43A047).copy(alpha = 0.15f)) {
+                            Text("已完成",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color(0xFF43A047))
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                if (task.description.isNotBlank()) {
+                    Text("描述", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(task.description, style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    Text("（无描述）", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                DetailRow("创建时间", fmt.format(Date(task.createdAt)))
+                if (task.deadline != null) {
+                    val overdue = task.deadline!! < System.currentTimeMillis() && !task.isCompleted
+                    DetailRow("截止日期", fmt.format(Date(task.deadline!!)),
+                        valueColor = if (overdue) MaterialTheme.colorScheme.error else null,
+                        suffix = if (overdue) " \u26A0\uFE0F 已过期" else "")
+                }
+                if (task.completedAt != null) {
+                    DetailRow("完成时间", fmt.format(Date(task.completedAt!!)))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+    )
+}
+
+@Composable
+private fun DetailRow(label: String, value: String, valueColor: Color? = null, suffix: String = "") {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value + suffix, style = MaterialTheme.typography.bodySmall,
+            color = valueColor ?: MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
 private fun ColumnScope.EmptyPlaceholder(onAddClick: () -> Unit) {
     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("📋", fontSize = 56.sp)
+            Text("\uD83D\uDCCB", fontSize = 56.sp)
             Spacer(Modifier.height(12.dp))
             Text("还没有开发任务", style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
