@@ -15,6 +15,9 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.qualitytool.app.MainActivity
 import com.qualitytool.app.data.AppDatabase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 class DeadlineWorker(
     context: Context,
@@ -39,13 +42,8 @@ class DeadlineWorker(
             }
         }
 
-        val task = AppDatabase.getInstance(applicationContext).taskDao()
-        val tasks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            var snapshot: List<com.qualitytool.app.data.TaskEntity> = emptyList()
-            AppDatabase.getInstance(applicationContext).taskDao().getAllTasks().collect {
-                snapshot = it; return@collect
-            }
-            snapshot
+        val tasks = withContext(Dispatchers.IO) {
+            AppDatabase.getInstance(applicationContext).taskDao().getAllTasks().first()
         }
         val entity = tasks.find { it.id == taskId } ?: return Result.success()
         if (entity.isCompleted) return Result.success()

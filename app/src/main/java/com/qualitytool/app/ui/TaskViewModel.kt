@@ -8,6 +8,9 @@ import androidx.work.*
 import com.qualitytool.app.data.TaskStorage
 import com.qualitytool.app.model.Task
 import com.qualitytool.app.model.TaskCategory
+import com.qualitytool.app.model.TaskPriority
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.qualitytool.app.worker.DeadlineWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -55,6 +58,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     )
     val darkTheme: StateFlow<Boolean?> = _darkTheme.asStateFlow()
+
+    private val _notificationEnabled = MutableStateFlow(
+        prefs.getBoolean("notification_enabled", true)
+    )
+    val notificationEnabled: StateFlow<Boolean> = _notificationEnabled.asStateFlow()
 
     private val _errorMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val errorMessage: SharedFlow<String> = _errorMessage.asSharedFlow()
@@ -114,6 +122,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     val categoryStats: StateFlow<Map<TaskCategory, Int>> = _tasks.map { list ->
         TaskCategory.entries.associateWith { cat -> list.count { it.category == cat } }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val priorityStats: StateFlow<Map<TaskPriority, Int>> = _tasks.map { list ->
+        TaskPriority.entries.associateWith { pri -> list.count { it.priority == pri } }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     init {
@@ -249,6 +261,36 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 null -> "auto"
             }
         ).apply()
+    }
+
+    fun setNotificationEnabled(enabled: Boolean) {
+        _notificationEnabled.value = enabled
+        prefs.edit().putBoolean("notification_enabled", enabled).apply()
+    }
+
+    fun importTasksFromJson(json: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val type = object : TypeToken<List<Task>>() {}.type
+                val imported: List<Task> = Gson().fromJson(json, type) ?: emptyList()
+                _tasks.value = imported
+                storage.saveTasks(imported)
+                _snackbarEvent.emit(SnackbarEvent("已导入 ${imported.size} 个任务", "", ""))
+            } catch (e: Exception) {
+                _errorMessage.emit("导入失败: ${e.message}")
+            }
+        }
+    }
+
+    fun clearAllData() {
+        _tasks.value = emptyList()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                storage.clearAll()
+            } catch (e: Exception) {
+                _errorMessage.emit("清除失败: ${e.message}")
+            }
+        }
     }
 
     private fun saveTasks() {

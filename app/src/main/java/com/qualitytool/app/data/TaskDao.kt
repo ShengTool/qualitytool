@@ -25,4 +25,7 @@ interface TaskDao {
 
     @Query("UPDATE tasks SET isCompleted = 1, completedAt = :timestamp WHERE isCompleted = 0")
     suspend fun completeAllTasks(timestamp: Long)
+
+    @Query("DELETE FROM tasks")
+    suspend fun deleteAll()
 }

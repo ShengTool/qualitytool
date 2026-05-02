@@ -58,6 +58,15 @@ class TaskStorage(private val context: Context) {
 
     fun exportTasksJson(tasks: List<Task>): String = gson.toJson(tasks)
 
+    suspend fun importFromJson(json: String): List<Task> {
+        val type = object : TypeToken<List<Task>>() {}.type
+        val tasks: List<Task> = gson.fromJson(json, type) ?: emptyList()
+        saveTasks(tasks)
+        return tasks
+    }
+
+    suspend fun clearAll() = withContext(Dispatchers.IO) { dao.deleteAll() }
+
     private suspend fun migrateFromJson() {
         if (!jsonFile.exists()) return
         try {

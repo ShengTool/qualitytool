@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">quality tool</string>
+    <string name="widget_description">显示开发任务完成进度和过期提醒</string>
 </resources>
