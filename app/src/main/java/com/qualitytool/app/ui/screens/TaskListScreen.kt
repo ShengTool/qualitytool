@@ -122,9 +122,10 @@ fun TaskListScreen(vm: TaskViewModel) {
                             )
                         }
                     }
-                    Box {                    IconButton(onClick = { showBatchMenu = true }) {
-                        Icon(Icons.Outlined.MoreVert, "更多操作")
-                    }
+                    Box {
+                        IconButton(onClick = { showBatchMenu = true }) {
+                            Icon(Icons.Outlined.MoreVert, "更多操作")
+                        }
                         DropdownMenu(expanded = showBatchMenu, onDismissRequest = { showBatchMenu = false }) {
                             DropdownMenuItem(
                                 text = { Text("一键完成全部") },
@@ -163,163 +164,198 @@ fun TaskListScreen(vm: TaskViewModel) {
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
+        /* ── 单一 LazyColumn 承载全部内容 —— 头部 item + 任务 items ── */
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            Spacer(Modifier.height(4.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                )
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text("任务进度", style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(2.dp))
-                        Text("${allTasks.count { it.isCompleted }} / ${allTasks.size} 已完成",
-                            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    }
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(56.dp)) {
-                        CircularProgressIndicator(
-                            progress = { progress }, modifier = Modifier.fillMaxSize(),
-                            strokeWidth = 4.dp, trackColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        Text("${(progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    }
-                }
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            if (allTasks.isNotEmpty()) {
+            /* 1. 任务进度卡片 */
+            item {
+                Spacer(Modifier.height(4.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                    )
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("分类统计", style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(6.dp))
-                        CategoryStatsBar(categoryStats, allTasks.size)
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-            }
-
-            OutlinedTextField(
-                value = searchQuery, onValueChange = { vm.setSearchQuery(it) },
-                modifier = Modifier.fillMaxWidth(), placeholder = { Text("搜索任务...") },
-                leadingIcon = { Icon(Icons.Default.Search, "搜索") },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty())
-                        IconButton(onClick = { vm.setSearchQuery("") }) { Icon(Icons.Default.Close, "清除") }
-                },
-                singleLine = true, shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                )
-            )
-
-            Spacer(Modifier.height(8.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = filterCategory == null,
-                    onClick = { vm.setFilterCategory(null) },
-                    label = { Text("全部", style = MaterialTheme.typography.labelSmall) })
-                TaskCategory.entries.forEach { cat ->
-                    FilterChip(selected = filterCategory == cat,
-                        onClick = { vm.setFilterCategory(if (filterCategory == cat) null else cat) },
-                        label = { Text("${cat.emoji} ${cat.label}", style = MaterialTheme.typography.labelSmall) })
-                }
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TaskFilterStatus.entries.forEach { s ->
-                    FilterChip(selected = filterStatus == s,
-                        onClick = { vm.setFilterStatus(s) },
-                        label = { Text(s.label, style = MaterialTheme.typography.labelSmall) })
-                }
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SortOption.entries.forEach { opt ->
-                    FilterChip(selected = sortOption == opt,
-                        onClick = { vm.setSortOption(opt) },
-                        label = { Text(opt.label, style = MaterialTheme.typography.labelSmall) })
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            when {
-                allTasks.isEmpty() -> EmptyPlaceholder { showDialog = true }
-                tasks.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Text("没有匹配的任务", style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                else -> LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    items(tasks, key = { it.id }) { task ->
-                        val taskIndex = tasks.indexOfFirst { it.id == task.id }
-                        val dismissState = rememberSwipeToDismissBoxState(
-                            confirmValueChange = { value ->
-                                if (value == SwipeToDismissBoxValue.EndToStart) {
-                                    taskToDelete = task; false
-                                } else false
-                            }
-                        )
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            enableDismissFromStartToEnd = false,
-                            backgroundContent = {
-                                val color by animateColorAsState(
-                                    targetValue = MaterialTheme.colorScheme.errorContainer,
-                                    label = "dismissBg"
-                                )
-                                Box(
-                                    Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
-                                        .background(color).padding(horizontal = 20.dp),
-                                    contentAlignment = Alignment.CenterEnd
-                                ) {
-                                    Icon(Icons.Default.Delete, "删除",
-                                        tint = MaterialTheme.colorScheme.onErrorContainer)
-                                }
-                            }
-                        ) {
-                            TaskCard(
-                                task = task,
-                                onToggle = { vm.toggleTask(task.id) },
-                                onEdit = { editingTask = task },
-                                onDelete = { taskToDelete = task },
-                                onClick = { viewingTask = task },
-                                onMoveUp = if (taskIndex > 0) ({ vm.moveTaskUp(task.id) }) else null,
-                                onMoveDown = if (taskIndex < tasks.lastIndex) ({ vm.moveTaskDown(task.id) }) else null
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("任务进度", style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(2.dp))
+                            Text("${allTasks.count { it.isCompleted }} / ${allTasks.size} 已完成",
+                                style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        }
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(56.dp)) {
+                            CircularProgressIndicator(
+                                progress = { progress }, modifier = Modifier.fillMaxSize(),
+                                strokeWidth = 4.dp, trackColor = MaterialTheme.colorScheme.surfaceVariant
                             )
+                            Text("${(progress * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                         }
                     }
-                    item { Spacer(Modifier.height(80.dp)) }
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 }
+            }
+
+            /* 2. 分类统计 */
+            if (allTasks.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("分类统计", style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(6.dp))
+                            CategoryStatsBar(categoryStats, allTasks.size)
+                        }
+                    }
+                }
+            }
+
+            /* 3. 搜索框 */
+            item {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = searchQuery, onValueChange = { vm.setSearchQuery(it) },
+                    modifier = Modifier.fillMaxWidth(), placeholder = { Text("搜索任务...") },
+                    leadingIcon = { Icon(Icons.Default.Search, "搜索") },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty())
+                            IconButton(onClick = { vm.setSearchQuery("") }) { Icon(Icons.Default.Close, "清除") }
+                    },
+                    singleLine = true, shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                    )
+                )
+            }
+
+            /* 4. 分类筛选 */
+            item {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = filterCategory == null,
+                        onClick = { vm.setFilterCategory(null) },
+                        label = { Text("全部", style = MaterialTheme.typography.labelSmall) })
+                    TaskCategory.entries.forEach { cat ->
+                        FilterChip(selected = filterCategory == cat,
+                            onClick = { vm.setFilterCategory(if (filterCategory == cat) null else cat) },
+                            label = { Text("${cat.emoji} ${cat.label}", style = MaterialTheme.typography.labelSmall) })
+                    }
+                }
+            }
+
+            /* 5. 状态筛选 */
+            item {
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TaskFilterStatus.entries.forEach { s ->
+                        FilterChip(selected = filterStatus == s,
+                            onClick = { vm.setFilterStatus(s) },
+                            label = { Text(s.label, style = MaterialTheme.typography.labelSmall) })
+                    }
+                }
+            }
+
+            /* 6. 排序 */
+            item {
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SortOption.entries.forEach { opt ->
+                        FilterChip(selected = sortOption == opt,
+                            onClick = { vm.setSortOption(opt) },
+                            label = { Text(opt.label, style = MaterialTheme.typography.labelSmall) })
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            /* 7. 空状态 / 无匹配 / 任务列表 */
+            if (allTasks.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("\uD83D\uDCCB", fontSize = 56.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("还没有开发任务", style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(4.dp))
+                            Text("点击下方按钮添加第一个任务", style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                            Spacer(Modifier.height(20.dp))
+                            OutlinedButton(onClick = { showDialog = true }, shape = RoundedCornerShape(12.dp)) {
+                                Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("添加任务")
+                            }
+                        }
+                    }
+                }
+            } else if (tasks.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                        Text("没有匹配的任务", style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                items(tasks, key = { it.id }) { task ->
+                    val taskIndex = tasks.indexOfFirst { it.id == task.id }
+                    val dismissState = rememberSwipeToDismissBoxState(
+                        confirmValueChange = { value ->
+                            if (value == SwipeToDismissBoxValue.EndToStart) {
+                                taskToDelete = task; false
+                            } else false
+                        }
+                    )
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        enableDismissFromStartToEnd = false,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        backgroundContent = {
+                            val color by animateColorAsState(
+                                targetValue = MaterialTheme.colorScheme.errorContainer,
+                                label = "dismissBg"
+                            )
+                            Box(
+                                Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
+                                    .background(color).padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
+                                Icon(Icons.Default.Delete, "删除",
+                                    tint = MaterialTheme.colorScheme.onErrorContainer)
+                            }
+                        }
+                    ) {
+                        TaskCard(
+                            task = task,
+                            onToggle = { vm.toggleTask(task.id) },
+                            onEdit = { editingTask = task },
+                            onDelete = { taskToDelete = task },
+                            onClick = { viewingTask = task },
+                            onMoveUp = if (taskIndex > 0) ({ vm.moveTaskUp(task.id) }) else null,
+                            onMoveDown = if (taskIndex < tasks.lastIndex) ({ vm.moveTaskDown(task.id) }) else null
+                        )
+                    }
+                }
+                item { Spacer(Modifier.height(80.dp)) }
             }
         }
     }
@@ -373,7 +409,6 @@ fun TaskListScreen(vm: TaskViewModel) {
 
 @Composable
 private fun CategoryStatsBar(stats: Map<TaskCategory, Int>, total: Int) {
-    val maxVal = stats.values.maxOrNull() ?: 1
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         TaskCategory.entries.forEach { cat ->
             val count = stats[cat] ?: 0
@@ -584,26 +619,5 @@ private fun DetailRow(label: String, value: String, valueColor: Color? = null, s
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value + suffix, style = MaterialTheme.typography.bodySmall,
             color = valueColor ?: MaterialTheme.colorScheme.onSurface)
-    }
-}
-
-@Composable
-private fun ColumnScope.EmptyPlaceholder(onAddClick: () -> Unit) {
-    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("\uD83D\uDCCB", fontSize = 56.sp)
-            Spacer(Modifier.height(12.dp))
-            Text("还没有开发任务", style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(4.dp))
-            Text("点击下方按钮添加第一个任务", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-            Spacer(Modifier.height(20.dp))
-            OutlinedButton(onClick = onAddClick, shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("添加任务")
-            }
-        }
     }
 }
